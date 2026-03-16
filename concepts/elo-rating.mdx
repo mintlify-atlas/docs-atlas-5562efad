@@ -1,0 +1,141 @@
+---
+title: 'Elo rating'
+description: 'How BR-25 maintains and updates Elo ratings for each team, including variable K-factors and dynamic home advantage.'
+---
+
+Elo is a rating system originally developed for chess that assigns each player (or team) a numerical strength score. After each match, the winner gains points and the loser loses points. The size of the exchange depends on how surprising the result was — an upset transfers more points than an expected result.
+
+In BR-25, Elo ratings serve as a continuous measure of team strength that is updated sequentially as match results are processed from the input CSV.
+
+## Starting ratings
+
+Every team starts with an initial rating of `ELO_RATING_INICIAL = 1500`. This is the conventional Elo midpoint, representing an average team with no prior match history.
+
+## Expected outcome
+
+Before a match, the model computes the expected score for the home team using the standard Elo formula, adjusted for home advantage:
+
+```text
+E_c = 1 / (1 + 10^((R_v - (R_c + home_adv)) / 400))
+E_v = 1 - E_c
+```
+
+Where:
+
+- `R_c` — current Elo rating of the home team
+- `R_v` — current Elo rating of the away team
+- `home_adv` — home advantage bonus for the home team (in Elo points)
+
+```python
+exp_c = 1 / (1 + 10 ** ((rating_v - (rating_c + vantagem_c)) / 400))
+exp_v = 1 - exp_c
+```
+
+A 200-point rating gap gives the stronger team an expected score of roughly 0.76. The divisor 400 controls how steeply the curve responds to rating differences — this is the standard value used across most Elo implementations.
+
+## Updating ratings after a match
+
+The actual result is encoded as:
+
+- `1.0` — home win
+- `0.5` — draw
+- `0.0` — away win
+
+Ratings are then updated:
+
+```text
+new_R_c = R_c + K × (resultado_real - E_c)
+new_R_v = R_v + K × ((1 - resultado_real) - E_v)
+```
+
+```python
+def atualizar_ratings_elo(rating_c, rating_v, placar_c, placar_v, vantagem_c):
+    if placar_c > placar_v:
+        resultado_real = 1.0
+    elif placar_c == placar_v:
+        resultado_real = 0.5
+    else:
+        resultado_real = 0.0
+
+    exp_c = 1 / (1 + 10 ** ((rating_v - (rating_c + vantagem_c)) / 400))
+    exp_v = 1 - exp_c
+
+    k = ELO_K_FACTOR_BASE * (1 + 0.5 * max(0, diff_gols - 1))
+
+    novo_rating_c = rating_c + k * (resultado_real - exp_c)
+    novo_rating_v = rating_v + k * ((1 - resultado_real) - exp_v)
+    return novo_rating_c, novo_rating_v
+```
+
+## Variable K-factor
+
+The K-factor controls how much a single match can move a team's rating. BR-25 uses a variable K-factor that scales with the goal difference of the match:
+
+```text
+K = K_BASE × (1 + 0.5 × max(0, goal_diff - 1))
+```
+
+With `ELO_K_FACTOR_BASE = 30`:
+
+| Goal difference | K value |
+|---|---|
+| 0 (draw) | 30 |
+| 1 | 30 |
+| 2 | 45 |
+| 3 | 60 |
+| 4 | 75 |
+
+<Info>
+A 1-0 win and a 1-1 draw both use K = 30 because the goal difference is either 1 or 0. A 3-0 demolition uses K = 60, reflecting that a larger margin is stronger evidence of true team quality.
+</Info>
+
+This approach is borrowed from the World Football Elo Ratings methodology, which similarly scales K by goal margin.
+
+## Dynamic home advantage
+
+Rather than using a single fixed home advantage for all teams, BR-25 computes a per-team home advantage based on that team's historical home goal difference:
+
+```python
+def calcular_vantagens_casa(df):
+    for time in times:
+        jogos_casa = df[df['mandante'] == time]
+        saldo_de_gols_medio = (
+            jogos_casa['gols_mandante'] - jogos_casa['gols_visitante']
+        ).mean()
+
+        if saldo_de_gols_medio and saldo_de_gols_medio > 0:
+            vantagem_rating = 60 * (saldo_de_gols_medio ** 0.8)
+        else:
+            vantagem_rating = 0
+
+        vantagens[time] = vantagem_rating
+```
+
+The formula `60 × (avg_goal_diff ^ 0.8)` applies a sublinear scaling — a team with an average home goal difference of 1.0 receives a 60-point bonus, while a team with a difference of 2.0 receives approximately 103 points rather than 120. This dampens the influence of outlier seasons.
+
+<Tip>
+Teams with a negative home goal difference receive a home advantage of 0, not a penalty. The model only rewards demonstrated home strength — it does not punish teams that perform worse at home.
+</Tip>
+
+The fallback value `ELO_VANTAGEM_CASA_PADRAO = 30` is used when a team has no historical home data.
+
+## Sequential processing
+
+Elo ratings are updated match by match in the order they appear in the input CSV. This means:
+
+- Ratings at the start of the season reflect all previous seasons in the dataset.
+- Prediction for match `n` uses ratings that incorporate the results of matches `1` through `n-1`.
+- Reordering the input rows would produce different ratings.
+
+<Note>
+Because Elo is updated incrementally, the accuracy of ratings improves as more matches are processed. Predictions early in a dataset — when teams have played few matches — are less reliable than predictions made later in the season.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Hybrid model" icon="code-branch" href="/concepts/hybrid-model">
+    How Elo adjustment is combined with Poisson goal estimates to produce outcome probabilities.
+  </Card>
+  <Card title="Poisson distribution" icon="chart-bar" href="/concepts/poisson-distribution">
+    The goal-scoring model that Elo adjustments are applied on top of.
+  </Card>
+</CardGroup>

@@ -1,0 +1,144 @@
+---
+title: 'Normalization'
+description: 'How team names are normalised from lowercase CSV entries to official Campeonato Brasileiro names, and how to validate your dataset.'
+---
+
+The CSV files store team names in lowercase (e.g. `flamengo`, `atletico mineiro`), but the prediction model and reports use the official accented names (e.g. `Flamengo`, `Atlético-MG`). The `normalize_and_validate_brasileirao.py` script bridges that gap and checks the dataset for structural problems.
+
+## Why normalisation is needed
+
+Team names in the Campeonato Brasileiro contain accented characters, hyphens, and abbreviations that vary across data sources:
+
+- `Atlético-MG` vs `atletico mineiro` vs `Atletico MG`
+- `Athletico-PR` vs `atletico paranaense`
+- `Grêmio` vs `gremio`
+- `São Paulo` vs `sao paulo`
+
+The CSV pipeline intentionally lowercases all names at load time to reduce duplicates from capitalisation differences. The normalisation step then maps these lowercase keys back to their canonical forms before they appear in reports or are compared against the `OFFICIAL_TEAMS` set.
+
+## The normalisation map
+
+The `NORMALIZATION_MAP` dictionary maps every known lowercase variant to its official name:
+
+```python
+NORMALIZATION_MAP = {
+    "vasco": "Vasco",
+    "internacional": "Internacional",
+    "corinthians": "Corinthians",
+    "vitoria": "Vitória",
+    "bahia": "Bahia",
+    "flamengo": "Flamengo",
+    "fluminense": "Fluminense",
+    "gremio": "Grêmio",
+    "sao paulo": "São Paulo",
+    "atletico mineiro": "Atlético-MG",
+    "atletico paranaense": "Athletico-PR",
+    "botafogo": "Botafogo",
+    "bragantino": "Bragantino",
+    "ceara": "Ceará",
+    "fortaleza": "Fortaleza",
+    "mirassol": "Mirassol",
+    "santos": "Santos",
+    "cruzeiro": "Cruzeiro",
+    "sport": "Sport",
+    "juventude": "Juventude",
+    # additional variants ...
+}
+```
+
+The official team set that names are validated against:
+
+```python
+OFFICIAL_TEAMS = {
+    "América-MG", "Athletico-PR", "Atlético-GO", "Atlético-MG",
+    "Bahia", "Botafogo", "Bragantino", "Ceará", "Chapecoense",
+    "Corinthians", "Coritiba", "Criciúma", "Cruzeiro", "Cuiabá",
+    "Flamengo", "Fluminense", "Fortaleza", "Goiás", "Grêmio",
+    "Internacional", "Juventude", "Mirassol", "Palmeiras", "Santos",
+    "São Paulo", "Sport", "Vasco", "Vitória",
+    # ...
+}
+```
+
+## The `normalize_team` function
+
+```python
+def normalize_team(name):
+    n = name.strip().lower()
+    return NORMALIZATION_MAP.get(n, name.strip())
+```
+
+The function:
+
+1. Strips surrounding whitespace and lowercases the input.
+2. Looks up the result in `NORMALIZATION_MAP`.
+3. Returns the canonical name if a mapping exists, or the stripped original if it does not.
+
+This means an unmapped name passes through unchanged. If that name is not in `OFFICIAL_TEAMS`, the validation script will flag it as invalid.
+
+## Running the validation script
+
+```bash
+python normalize_and_validate_brasileirao.py
+```
+
+The script reads `campeonato-brasileiro-full.csv` and produces a report covering:
+
+- **Unique teams** — every distinct team name found after normalisation.
+- **Invalid teams** — names that could not be mapped to an entry in `OFFICIAL_TEAMS`.
+- **Malformed rows** — rows that do not contain exactly five columns.
+- **Non-integer goals** — rows where `gols_mandante` or `gols_visitante` is not a digit string.
+
+Example output:
+
+```
+Unique teams found: 32
+Invalid teams: {'atletico go', 'america mg'}
+Malformed rows: [(14, ['flamengo', 'botafogo', '2']), ...]
+Non-integer goals: [(88, '?', '1'), ...]
+```
+
+### What each report item means
+
+| Report item | What to do |
+|---|---|
+| Invalid teams | Add a mapping to `NORMALIZATION_MAP` or correct the name in the CSV. |
+| Malformed rows | Open the CSV and check the flagged line numbers for missing or extra commas. |
+| Non-integer goals | Replace any placeholder or null value with the correct integer. |
+
+<Warning>
+Always use consistent lowercase names in `br-25.csv`. If you use `"Flamengo"` (capitalised) instead of `"flamengo"`, the loader will still lowercase it at runtime — but the normalisation map will match against the lowercased key regardless, so results are consistent. The real risk is mixing spellings like `"atletico-mineiro"` and `"atletico mineiro"` for the same club; these produce separate Elo rating entries and silently split the model's match history for that team.
+</Warning>
+
+## Adding a new variant
+
+<Steps>
+  <Step title="Identify the variant">
+    Run the validation script and note the team name in the **Invalid teams** list.
+  </Step>
+  <Step title="Add a mapping">
+    Open `normalize_and_validate_brasileirao.py` and add an entry to `NORMALIZATION_MAP`:
+
+```python
+"atletico go": "Atlético-GO",
+```
+  </Step>
+  <Step title="Re-run the script">
+    Run the script again to confirm the invalid team no longer appears in the report.
+
+```bash
+python normalize_and_validate_brasileirao.py
+```
+  </Step>
+</Steps>
+
+---
+
+<Columns cols={2}>
+  <Card title="Data format" icon="file-csv" href="/data/data-format">
+    CSV column schema and how to add new match results.
+  </Card>
+  <Card title="Historical data" icon="clock-rotate-left" href="/data/historical-data">
+    The two CSV files and chronological Elo processing.
+  </Card>
+</Columns>

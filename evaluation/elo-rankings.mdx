@@ -1,0 +1,118 @@
+---
+title: 'Elo rankings'
+description: 'How Sassamaru BR-25 computes and displays Elo ratings for Campeonato Brasileiro clubs.'
+---
+
+The Elo ranking system assigns each club a numerical strength rating that updates after every match. Ratings start at 1500 and converge toward a club's true relative strength over time.
+
+## How Elo ratings work
+
+An Elo rating of **1500** represents average strength. A club rated above 1500 is stronger than average; below 1500 is weaker. The gap between two clubs' ratings determines the expected outcome — a 200-point gap means the stronger side wins roughly 76% of the time.
+
+After each match the ratings of both clubs shift based on three factors:
+
+- **Result** — win, draw, or loss.
+- **Goal difference** — larger margins produce larger rating changes. The K factor is scaled as `K_BASE * log(diff + 1)` for decisive results.
+- **Home advantage** — a per-club home advantage bonus derived from historical home goal surplus (set to `0` in BR-25 as the data covers neutral-ground and multi-season averages).
+
+```python
+ELO_INICIAL = 1500
+K_BASE = 20
+VANTAGEM_CASA = 0
+
+def atualiza_elo(r_c, r_v, g_c, g_v, v_c):
+    if g_c > g_v:
+        res, diff = 1.0, g_c - g_v
+    elif g_c < g_v:
+        res, diff = 0.0, g_v - g_c
+    else:
+        res, diff = 0.5, 0
+    k = K_BASE * math.log(diff + 1) if res != 0.5 else K_BASE
+    e_c = 1 / (1 + 10 ** ((r_v - (r_c + v_c)) / 400))
+    return r_c + k * (res - e_c), r_v + k * ((1 - res) - (1 - e_c))
+```
+
+## Focus clubs
+
+The script tracks 12 historically prominent Brazilian clubs in detail:
+
+```python
+clubs_foco = [
+    'flamengo', 'fluminense', 'vasco', 'botafogo',
+    'palmeiras', 'sao paulo', 'santos', 'corinthians',
+    'atletico mineiro', 'cruzeiro', 'gremio', 'internacional'
+]
+```
+
+These clubs were chosen because they have the longest continuous presence in the Série A dataset and represent the most complete rating histories.
+
+<Note>
+All other clubs that appear in `campeonato-brasileiro-full.csv` still receive Elo ratings and influence the ratings of the focus clubs through their head-to-head results. The focus list only controls which clubs are highlighted in the final output table.
+</Note>
+
+## Running the ranking script
+
+<Steps>
+  <Step title="Ensure the data file is present">
+    The script reads from `sassamaru-br-25/campeonato-brasileiro-full.csv`. Confirm this file exists before running.
+
+    ```bash
+    ls sassamaru-br-25/campeonato-brasileiro-full.csv
+    ```
+  </Step>
+  <Step title="Run the ranking script">
+    ```bash
+    python rating_elo_25.py
+    ```
+
+    The script processes all historical matches in chronological order, updating each club's rating after every game.
+  </Step>
+  <Step title="Read the output table">
+    The final ratings for all focus clubs are printed as a Markdown table:
+
+    ```text
+    | Clube             |   Elo Final |
+    |:------------------|------------:|
+    | palmeiras         |      1672.3 |
+    | atletico mineiro  |      1648.1 |
+    | flamengo          |      1631.7 |
+    | internacional     |      1618.4 |
+    | gremio            |      1605.9 |
+    | corinthians       |      1598.2 |
+    | sao paulo         |      1587.6 |
+    | santos            |      1574.0 |
+    | cruzeiro          |      1561.3 |
+    | botafogo          |      1532.8 |
+    | fluminense        |      1521.4 |
+    | vasco             |      1494.7 |
+    ```
+  </Step>
+</Steps>
+
+## Viewing Elo rankings in the GUI
+
+You can also inspect the current Elo standings without leaving the application interface:
+
+1. Launch the Sassamaru BR-25 GUI.
+2. Click **Mostrar Ranking ELO dos Clubes** in the sidebar panel.
+
+The GUI reads the same underlying rating dictionary and renders the table inline, sorted from highest to lowest rating.
+
+## Rating drift for non-focus clubs
+
+Every club that ever appeared as a home or away team in the dataset receives an initial Elo of 1500 and accumulates rating changes just like focus clubs. Because they play against focus clubs, their strength estimate directly affects how focus clubs' ratings move. Ignoring them would systematically bias the focus club ratings.
+
+<Tip>
+If you want to inspect the final Elo of a non-focus club, access it directly from the `elos` dictionary in the script after processing is complete.
+</Tip>
+
+---
+
+<Columns cols={2}>
+  <Card title="xG rankings" icon="chart-bar" href="/evaluation/xg-rankings">
+    View model-predicted goal output for each club.
+  </Card>
+  <Card title="Historical insights" icon="clock-rotate-left" href="/evaluation/historical-insights">
+    Home win rates, derby imbalances, and Elo growth over time.
+  </Card>
+</Columns>

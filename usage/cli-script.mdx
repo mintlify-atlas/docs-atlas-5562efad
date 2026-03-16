@@ -1,0 +1,94 @@
+---
+title: CLI script
+description: Run match predictions from the command line using previsao.py.
+---
+
+`previsao.py` is the command-line entry point for Sassamaru BR-25. It loads historical match data, computes team strengths and Elo ratings, then prints a Markdown prediction table for a fixed set of upcoming matches.
+
+## Prerequisites
+
+- Python 3.9 or later
+- `pandas` and `tabulate` installed (`pip install pandas tabulate`)
+- The file `sassamaru-br-25/br-25.csv` present relative to your working directory
+
+## Running the script
+
+```bash
+python previsao.py
+```
+
+The script reads `sassamaru-br-25/br-25.csv` by default. Make sure you run the command from the repository root so the relative path resolves correctly.
+
+<Tip>
+Capture the output as a Markdown file for easy sharing:
+
+```bash
+python previsao.py > round1.md
+```
+</Tip>
+
+## Setting up custom matchups
+
+The matches to predict are defined in the `jogos` list inside `previsao.py`. Edit this list before running the script to set up any matchups you want.
+
+```python
+jogos = [
+    ('internacional', 'vitoria'),
+    ('bahia', 'atletico mineiro'),
+    ('corinthians', 'bragantino'),
+    ('cruzeiro', 'gremio'),
+    ('fortaleza', 'ceara'),
+    ('juventude', 'sport'),
+    ('flamengo', 'sao paulo'),
+    ('vasco', 'botafogo'),
+    ('santos', 'palmeiras'),
+    ('mirassol', 'fluminense'),
+]
+```
+
+Each tuple is `('home_team', 'away_team')`. Team names must be **lowercase** and match the spellings used in `br-25.csv` exactly (accents stripped, spaces kept).
+
+<Warning>
+If a team name is not found in the CSV, `prever_partida_hibrido` will raise an exception and that row will be skipped. An error message is printed to stdout.
+</Warning>
+
+## Example output
+
+The script prints a header line followed by a Markdown table:
+
+```text
+# Previsão de Jogos - Modelo Híbrido Poisson + Elo
+
+| Mandante      | ELO Mandante | Visitante        | ELO Visitante | Diferença ELO | Gols Mandante | Gols Visitante | Prob Mandante (%) | Prob Empate (%) | Prob Visitante (%) | Palpite  |
+|:--------------|-------------:|:-----------------|--------------:|--------------:|--------------:|---------------:|------------------:|----------------:|-------------------:|:---------|
+| Internacional |         1500 | Vitoria          |          1500 |             0 |          1.23 |           0.98 |              42.1 |            29.5 |               28.4 | Mandante |
+```
+
+## Output column reference
+
+| Column | Description |
+|--------|-------------|
+| **Mandante** | Home team name |
+| **ELO Mandante** | Home team Elo rating at time of prediction |
+| **Visitante** | Away team name |
+| **ELO Visitante** | Away team Elo rating at time of prediction |
+| **Diferença ELO** | `ELO Mandante − ELO Visitante` (positive favours home) |
+| **Gols Mandante** | Expected goals for the home team (hybrid model) |
+| **Gols Visitante** | Expected goals for the away team (hybrid model) |
+| **Prob Mandante (%)** | Probability of a home win |
+| **Prob Empate (%)** | Probability of a draw |
+| **Prob Visitante (%)** | Probability of an away win |
+| **Palpite** | Predicted outcome: `Mandante`, `Empate`, or `Visitante` |
+
+<Note>
+The **Palpite** column reflects whichever outcome has the highest probability. It is not a confidence score — always check the three probability columns for the full picture.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="GUI application" icon="display" href="/usage/gui-application">
+    Run interactive simulations with the Tkinter desktop app.
+  </Card>
+  <Card title="Calibration" icon="sliders" href="/usage/calibration">
+    Tune ELO_INFLUENCE, home advantage, and other model constants.
+  </Card>
+</CardGroup>

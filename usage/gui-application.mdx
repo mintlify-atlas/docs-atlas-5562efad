@@ -1,0 +1,126 @@
+---
+title: GUI application
+description: Run Monte Carlo simulations and explore club rankings with the Sassamaru desktop interface.
+---
+
+`sassamaru.py` provides a Tkinter desktop application for running large-scale Monte Carlo simulations without editing source code. It supports up to 10 simultaneous matchups, saves results to a timestamped Markdown file, and lets you inspect xG and Elo rankings in popup windows.
+
+## Launching the application
+
+```bash
+python sassamaru.py
+```
+
+A window titled **Simulador Campeonato Brasileiro** opens at 750 × 600 pixels.
+
+<Note>
+On macOS, if the window does not appear, run `python -m tkinter` first to confirm Tkinter is installed. On some Linux distributions you may need `sudo apt install python3-tk`.
+</Note>
+
+## Interface overview
+
+The window contains three sections:
+
+1. **Match entry rows** — 10 rows, each with a **Mandante** (home) and **Visitante** (away) text field.
+2. **Action buttons** — five buttons described below.
+3. **Progress bar and label** — shows simulation progress in real time.
+
+### Action buttons
+
+| Button | What it does |
+|--------|--------------|
+| **Rodar 10 mil simulações** | Runs 10,000 Monte Carlo iterations for the entered matches |
+| **Rodar 100 mil simulações** | Runs 100,000 Monte Carlo iterations (more accurate, takes longer) |
+| **Adicionar partida ao CSV** | Appends a completed match result to `br-25.csv` |
+| **Mostrar Ranking xG dos Clubes** | Opens a popup with xG Total and xG Médio/Jogo per club |
+| **Mostrar Ranking ELO dos Clubes** | Opens a popup with the dynamic Elo ranking for all clubs |
+
+## Running a simulation
+
+<Steps>
+  <Step title="Enter matchups">
+    Type the home team name in each **Mandante** field and the away team name in the corresponding **Visitante** field. You can fill between 1 and 10 rows — leave unused rows blank.
+
+    Team names must be **lowercase** and match the spellings in `br-25.csv` exactly (e.g. `atletico mineiro`, not `Atlético Mineiro`).
+  </Step>
+
+  <Step title="Choose simulation size">
+    Click **Rodar 10 mil simulações** for a quick estimate, or **Rodar 100 mil simulações** for higher accuracy. The application validates team names before starting; any unrecognised name triggers an error dialog.
+  </Step>
+
+  <Step title="Monitor progress">
+    The progress bar and label update as the simulation runs. The simulation runs in a background thread so the UI stays responsive.
+  </Step>
+
+  <Step title="Read the results">
+    When the simulation finishes, a dialog shows the path to the generated file:
+
+    ```text
+    Simulação finalizada
+    Arquivo gerado:
+    simulacao_2026-03-16_14-32-05.md
+    ```
+
+    Open this file in any Markdown viewer. It contains the same column structure as the CLI output plus Elo ratings and a **Palpite** column.
+  </Step>
+</Steps>
+
+<Warning>
+100,000 simulations can take 30–60 seconds depending on your hardware. Do not close the window during this time.
+</Warning>
+
+## Adding a result to the CSV
+
+After a real match is played, record the result so future predictions incorporate it:
+
+<Steps>
+  <Step title="Enter the match">
+    Fill in the **Mandante** and **Visitante** fields for the match you want to record.
+  </Step>
+
+  <Step title="Click Adicionar partida ao CSV">
+    A dialog prompts you for the final score. Enter the goals for each side.
+  </Step>
+
+  <Step title="Confirm">
+    The row is appended to `sassamaru-br-25/br-25.csv`. The next simulation run will use the updated data.
+  </Step>
+</Steps>
+
+## Viewing club rankings
+
+### xG ranking
+
+Click **Mostrar Ranking xG dos Clubes** to open a popup table with:
+
+- **xG Total** — cumulative expected goals across all matches in the CSV
+- **xG Médio/Jogo** — average expected goals per match
+
+This reflects Poisson-derived attack and defence strengths, not raw scored goals.
+
+### Elo ranking
+
+Click **Mostrar Ranking ELO dos Clubes** to open a popup showing the **ELO Dinâmico** for every club, ordered from highest to lowest. Ratings start at 1500 and evolve with each match in the CSV.
+
+<Tip>
+After adding several new results via **Adicionar partida ao CSV**, click the ranking buttons again — the popups re-compute from the updated data each time.
+</Tip>
+
+## Output file format
+
+Result files are saved in the current working directory with the naming pattern:
+
+```text
+simulacao_YYYY-MM-DD_HH-MM-SS.md
+```
+
+Each file is a standalone Markdown document you can commit to the repository or share directly.
+
+<CardGroup cols={2}>
+  <Card title="CLI script" icon="terminal" href="/usage/cli-script">
+    Run quick predictions from the command line without the GUI.
+  </Card>
+  <Card title="Calibration" icon="sliders" href="/usage/calibration">
+    Tune model constants to adjust prediction behaviour.
+  </Card>
+</CardGroup>

@@ -1,0 +1,65 @@
+---
+title: "Introduction"
+description: "A hybrid Poisson + Elo rating model for predicting Campeonato Brasileiro football match outcomes."
+---
+
+# Sassamaru BR-25
+
+Sassamaru BR-25 is an open-source match prediction system for the **Campeonato Brasileiro** (Brazilian Football Championship). It combines two well-established statistical methods — the **Poisson distribution** and the **Elo rating system** — into a single hybrid model that produces realistic win/draw/loss probabilities and expected goal counts for any matchup between league teams.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in minutes with the CLI script or GUI application.
+  </Card>
+  <Card title="Hybrid Model" icon="brain" href="/concepts/hybrid-model">
+    Understand how Poisson and Elo work together to generate predictions.
+  </Card>
+  <Card title="Model Reference" icon="code" href="/reference/functions">
+    Explore every public function and its parameters.
+  </Card>
+  <Card title="Calibration" icon="sliders" href="/usage/calibration">
+    Tune home advantage and Elo influence to match real-world results.
+  </Card>
+</CardGroup>
+
+## What the model does
+
+For any given matchup, the model:
+
+1. Computes each team's **attack and defense strength** relative to the league average using historical goal data.
+2. Derives **base expected goals** for both teams from those Poisson strength indices.
+3. Adjusts expected goals using each team's current **dynamic Elo rating** and a per-team **home advantage bonus**.
+4. Simulates every possible scoreline up to 8 goals per side and sums probabilities into win/draw/loss outcomes.
+5. Returns the predicted scoreline, probabilities, and the recommended **palpite** (tip).
+
+## Key features
+
+- **Hybrid Poisson + Elo** — statistical rigor meets dynamic team strength tracking
+- **Dynamic home advantage** — per-team home bonus derived from historical goal difference, not a fixed constant
+- **Monte Carlo simulation** — run 10 000 or 100 000 iterations for robust probability estimates
+- **Tkinter GUI** — interactive desktop application with progress bar and ELO/xG ranking windows
+- **CLI batch mode** — script produces a Markdown table ready to paste into reports or posts
+- **CSV data pipeline** — load, normalise, and append match results without code changes
+- **Configurable parameters** — two top-level constants control the model's sensitivity
+
+## Requirements
+
+| Dependency | Version |
+|---|---|
+| Python | 3.7 or later |
+| pandas | any recent version |
+| numpy | any recent version (GUI only) |
+| matplotlib | any recent version (analysis scripts only) |
+| tkinter | bundled with CPython |
+
+Install the minimal runtime dependencies:
+
+```bash
+pip install pandas
+```
+
+## Repository
+
+The full source code is available on GitHub:
+
+[mtgr18977/sassamaru-br-25](https://github.com/mtgr18977/sassamaru-br-25)

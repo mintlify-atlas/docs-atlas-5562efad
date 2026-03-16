@@ -1,0 +1,532 @@
+---
+title: "Functions"
+description: "Complete reference for every public function in previsao.py and sassamaru.py."
+---
+
+This page documents all eight public functions exposed by the Sassamaru BR-25 model. Functions from `previsao.py` form the core prediction pipeline; functions from `sassamaru.py` extend it with xG analytics, Monte Carlo simulation, and data management.
+
+---
+
+## `poisson`
+
+```python
+poisson(lmbda: float, k: int) -> float
+```
+
+Calculates the probability of exactly `k` occurrences given a Poisson distribution with mean `lmbda`. This is the atomic building block used when summing over all possible scorelines in the prediction grid.
+
+### Parameters
+
+<ParamField path="lmbda" type="float" required>
+  The expected number of occurrences (mean of the Poisson distribution). Typically the expected goals value for one team in a match.
+</ParamField>
+
+<ParamField path="k" type="int" required>
+  The number of occurrences to evaluate. In the context of match prediction, this is a specific goal count (0 through `POISSON_MAX_GOLS`).
+</ParamField>
+
+### Return value
+
+<ResponseField name="probability" type="float">
+  The probability that exactly `k` events occur, in the range `[0.0, 1.0]`.
+</ResponseField>
+
+### Example
+
+```python
+import math
+from previsao import poisson
+
+# Probability of scoring exactly 2 goals when 1.8 are expected
+p = poisson(1.8, 2)
+print(f"{p:.4f}")  # 0.2678
+```
+
+---
+
+## `calcular_forcas_poisson`
+
+```python
+calcular_forcas_poisson(df: pd.DataFrame) -> tuple[dict, dict]
+```
+
+Derives each team's attack and defense strength indices (home and away) relative to the league average. These indices are the primary inputs to the expected goals calculation in `prever_partida_hibrido`.
+
+### Parameters
+
+<ParamField path="df" type="pd.DataFrame" required>
+  Historical match data. Required columns:
+
+  - `mandante` — home team name (lowercase string)
+  - `visitante` — away team name (lowercase string)
+  - `gols_mandante` — goals scored by home team (int)
+  - `gols_visitante` — goals scored by away team (int)
+</ParamField>
+
+### Return value
+
+<ResponseField name="result" type="tuple">
+  A two-element tuple `(forcas, medias_liga)`.
+
+  <Expandable title="forcas (dict)">
+    <ResponseField name="forcas" type="dict[str, dict]">
+      Keyed by team name (lowercase). Each entry contains:
+
+      <ResponseField name="ataque_casa" type="float">
+        Home attack strength index. Values above 1.0 indicate above-average home attacking output.
+      </ResponseField>
+      <ResponseField name="defesa_casa" type="float">
+        Home defense strength index. Values below 1.0 indicate a stronger-than-average home defense.
+      </ResponseField>
+      <ResponseField name="ataque_fora" type="float">
+        Away attack strength index.
+      </ResponseField>
+      <ResponseField name="defesa_fora" type="float">
+        Away defense strength index.
+      </ResponseField>
+    </ResponseField>
+  </Expandable>
+
+  <Expandable title="medias_liga (dict)">
+    <ResponseField name="medias_liga" type="dict">
+      League-wide goal averages used to normalise the strength indices.
+
+      <ResponseField name="gols_casa" type="float">
+        Average goals scored per match by home teams across all historical data.
+      </ResponseField>
+      <ResponseField name="gols_fora" type="float">
+        Average goals scored per match by away teams across all historical data.
+      </ResponseField>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```python
+import pandas as pd
+from previsao import calcular_forcas_poisson
+
+df = pd.read_csv("br-25.csv")
+forcas, medias_liga = calcular_forcas_poisson(df)
+
+print(medias_liga)
+# {'gols_casa': 1.52, 'gols_fora': 1.18}
+
+print(forcas["flamengo"])
+# {'ataque_casa': 1.41, 'defesa_casa': 0.83, 'ataque_fora': 1.22, 'defesa_fora': 0.91}
+```
+
+---
+
+## `calcular_vantagens_casa`
+
+```python
+calcular_vantagens_casa(df: pd.DataFrame) -> dict
+```
+
+Calculates a per-team home advantage bonus expressed in Elo points, derived from each team's historical average home goal difference. Teams with a positive average home goal difference receive a nonzero bonus; teams with a neutral or negative record fall back to `ELO_VANTAGEM_CASA_PADRAO`.
+
+The formula applied for teams with a positive average home goal difference is:
+
+```
+vantagem = 60 × (avg_home_goal_diff ^ 0.8)
+```
+
+### Parameters
+
+<ParamField path="df" type="pd.DataFrame" required>
+  Historical match data with columns `mandante`, `visitante`, `gols_mandante`, `gols_visitante`.
+</ParamField>
+
+### Return value
+
+<ResponseField name="vantagens" type="dict[str, float]">
+  Keys are team names (lowercase). Values are home advantage in Elo points. Teams without a positive home record receive 0 from this function; the caller applies the fallback constant.
+</ResponseField>
+
+### Example
+
+```python
+from previsao import calcular_vantagens_casa
+
+vantagens = calcular_vantagens_casa(df)
+print(vantagens["atletico-mg"])  # e.g. 48.3
+print(vantagens["cruzeiro"])     # e.g. 0.0
+```
+
+<Tip>
+  Teams that consistently win at home (large positive average goal difference) can accumulate bonuses well above the default constant. Check calibration after loading a new season's data.
+</Tip>
+
+---
+
+## `atualizar_ratings_elo`
+
+```python
+atualizar_ratings_elo(
+    rating_c: float,
+    rating_v: float,
+    placar_c: int,
+    placar_v: int,
+    vantagem_c: float
+) -> tuple[float, float]
+```
+
+Updates both teams' Elo ratings after a completed match. The K-factor is scaled by goal difference to reward dominant victories more than narrow wins.
+
+Formulas used:
+
+```
+K = ELO_K_FACTOR_BASE × (1 + 0.5 × max(0, |placar_c − placar_v| − 1))
+E_c = 1 / (1 + 10^((R_v − (R_c + vantagem_c)) / 400))
+new_R_c = R_c + K × (result_c − E_c)
+new_R_v = R_v + K × (result_v − E_v)
+```
+
+where `result_c` is 1 (home win), 0.5 (draw), or 0 (away win).
+
+### Parameters
+
+<ParamField path="rating_c" type="float" required>
+  Current Elo rating of the home team before the match.
+</ParamField>
+
+<ParamField path="rating_v" type="float" required>
+  Current Elo rating of the away team before the match.
+</ParamField>
+
+<ParamField path="placar_c" type="int" required>
+  Goals scored by the home team.
+</ParamField>
+
+<ParamField path="placar_v" type="int" required>
+  Goals scored by the away team.
+</ParamField>
+
+<ParamField path="vantagem_c" type="float" required>
+  Home advantage in Elo points for this specific team. Sourced from `calcular_vantagens_casa` or the fallback constant.
+</ParamField>
+
+### Return value
+
+<ResponseField name="ratings" type="tuple[float, float]">
+  A two-element tuple `(new_rating_c, new_rating_v)` — the updated Elo ratings for the home and away teams respectively.
+</ResponseField>
+
+### Example
+
+```python
+from previsao import atualizar_ratings_elo
+
+# Flamengo (home, 1620) beats Palmeiras (away, 1580) 3-1
+new_flamengo, new_palmeiras = atualizar_ratings_elo(
+    rating_c=1620,
+    rating_v=1580,
+    placar_c=3,
+    placar_v=1,
+    vantagem_c=48.3
+)
+print(new_flamengo)   # e.g. 1641.2
+print(new_palmeiras)  # e.g. 1558.8
+```
+
+---
+
+## `prever_partida_hibrido`
+
+```python
+prever_partida_hibrido(
+    time_casa: str,
+    time_visitante: str,
+    context: dict
+) -> dict
+```
+
+The primary prediction function. Combines Poisson strength indices with Elo-adjusted expected goals to produce win/draw/loss probabilities and a recommended tip (`palpite`) for a single match.
+
+Expected goals are computed as:
+
+```
+λ_casa     = ataque_casa × defesa_fora × gols_casa_media × elo_factor
+λ_visitante = ataque_fora × defesa_casa × gols_fora_media / elo_factor
+```
+
+where `elo_factor = 1 + ELO_INFLUENCE × elo_diff_normalised`.
+
+Probabilities are summed over all scorelines `(i, j)` for `i, j ∈ [0, POISSON_MAX_GOLS]`.
+
+### Parameters
+
+<ParamField path="time_casa" type="str" required>
+  Home team name in lowercase (must match keys in `context`).
+</ParamField>
+
+<ParamField path="time_visitante" type="str" required>
+  Away team name in lowercase (must match keys in `context`).
+</ParamField>
+
+<ParamField path="context" type="dict" required>
+  Prediction context built once per session and reused across all matches. Required keys:
+
+  <Expandable title="context keys">
+    <ResponseField name="elo_ratings" type="dict[str, float]">
+      Current Elo rating for every team, keyed by lowercase team name.
+    </ResponseField>
+    <ResponseField name="forcas_poisson" type="dict[str, dict]">
+      Attack and defense strength indices from `calcular_forcas_poisson`.
+    </ResponseField>
+    <ResponseField name="medias_liga" type="dict">
+      League goal averages (`gols_casa`, `gols_fora`) from `calcular_forcas_poisson`.
+    </ResponseField>
+    <ResponseField name="vantagens_casa" type="dict[str, float]">
+      Per-team home advantage in Elo points from `calcular_vantagens_casa`.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+### Return value
+
+See the [Output format](/reference/output-format) page for the complete field-by-field breakdown.
+
+<ResponseField name="prediction" type="dict">
+  A dictionary with keys: `Mandante`, `Visitante`, `Elo Mandante`, `Elo Visitante`, `Gols Esp. Mandante`, `Gols Esp. Visitante`, `P(Mandante)%`, `P(Empate)%`, `P(Visitante)%`, `Palpite`.
+</ResponseField>
+
+### Example
+
+```python
+import pandas as pd
+from previsao import (
+    calcular_forcas_poisson,
+    calcular_vantagens_casa,
+    atualizar_ratings_elo,
+    prever_partida_hibrido,
+    ELO_RATING_INICIAL,
+)
+
+df = pd.read_csv("br-25.csv")
+forcas, medias_liga = calcular_forcas_poisson(df)
+vantagens = calcular_vantagens_casa(df)
+
+# Build Elo ratings by replaying historical results
+elo_ratings = {}
+for _, row in df.iterrows():
+    c, v = row["mandante"], row["visitante"]
+    elo_ratings.setdefault(c, ELO_RATING_INICIAL)
+    elo_ratings.setdefault(v, ELO_RATING_INICIAL)
+    elo_ratings[c], elo_ratings[v] = atualizar_ratings_elo(
+        elo_ratings[c], elo_ratings[v],
+        row["gols_mandante"], row["gols_visitante"],
+        vantagens.get(c, 30)
+    )
+
+context = {
+    "elo_ratings": elo_ratings,
+    "forcas_poisson": forcas,
+    "medias_liga": medias_liga,
+    "vantagens_casa": vantagens,
+}
+
+result = prever_partida_hibrido("flamengo", "palmeiras", context)
+print(result["Palpite"])          # "Mandante"
+print(result["P(Mandante)%"])     # "54.3"
+```
+
+---
+
+## `calcular_xg_por_clube`
+
+```python
+calcular_xg_por_clube(df: pd.DataFrame) -> tuple[dict, dict]
+```
+
+Calculates total and per-game average expected goals (xG) for every club across all historical matches. Available in `sassamaru.py` and used by the GUI's xG ranking window.
+
+### Parameters
+
+<ParamField path="df" type="pd.DataFrame" required>
+  Historical match DataFrame with columns `mandante`, `visitante`, `gols_mandante`, `gols_visitante`.
+</ParamField>
+
+### Return value
+
+<ResponseField name="result" type="tuple">
+  A two-element tuple `(xg_total, xg_medio)`.
+
+  <Expandable title="xg_total (dict)">
+    <ResponseField name="xg_total" type="dict[str, float]">
+      Total expected goals accumulated by each team across all matches in the dataset.
+    </ResponseField>
+  </Expandable>
+
+  <Expandable title="xg_medio (dict)">
+    <ResponseField name="xg_medio" type="dict[str, float]">
+      Average expected goals per game for each team.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+```python
+from sassamaru import calcular_xg_por_clube
+
+xg_total, xg_medio = calcular_xg_por_clube(df)
+print(xg_total["flamengo"])  # e.g. 87.4
+print(xg_medio["flamengo"])  # e.g. 2.12
+```
+
+---
+
+## `rodar_simulacao_paralela`
+
+```python
+rodar_simulacao_paralela(
+    df: pd.DataFrame,
+    jogos: list[tuple[str, str]],
+    n_simulacoes: int,
+    progress_callback: callable | None = None
+) -> list[dict]
+```
+
+Runs Monte Carlo simulations for a list of matches using `multiprocessing.Pool`. Each simulation re-samples the prediction for a match, allowing probability estimates to converge with increasing `n_simulacoes`.
+
+<Note>
+  This function spawns multiple OS processes. On Windows, ensure the call site is guarded with `if __name__ == "__main__":` to avoid recursive process creation.
+</Note>
+
+### Parameters
+
+<ParamField path="df" type="pd.DataFrame" required>
+  Historical match DataFrame used to rebuild Poisson strengths and Elo ratings for each simulation run.
+</ParamField>
+
+<ParamField path="jogos" type="list" required>
+  List of `(home_team, away_team)` tuples in lowercase. Example: `[("flamengo", "palmeiras"), ("santos", "sao-paulo")]`.
+</ParamField>
+
+<ParamField path="n_simulacoes" type="int" required>
+  Number of simulation iterations per match. Recommended values: `10000` for interactive use, `100000` for final reports.
+</ParamField>
+
+<ParamField path="progress_callback" type="callable" default="None">
+  Optional function called after each completed batch with signature `callback(done: int, total: int)`. Use this to drive a progress bar in the GUI.
+</ParamField>
+
+### Return value
+
+<ResponseField name="resultados" type="list[dict]">
+  A flat list of prediction dictionaries, one per simulation per match. Each dict follows the same schema as the output of `prever_partida_hibrido`. Aggregate these results to compute stable probability distributions.
+</ResponseField>
+
+### Example
+
+```python
+from sassamaru import rodar_simulacao_paralela
+
+jogos = [("flamengo", "palmeiras"), ("santos", "cruzeiro")]
+resultados = rodar_simulacao_paralela(
+    df=df,
+    jogos=jogos,
+    n_simulacoes=10000,
+    progress_callback=lambda done, total: print(f"{done}/{total}")
+)
+print(len(resultados))  # 20000 (10000 sims × 2 matches)
+```
+
+---
+
+## `salvar_md_resumo_simulacao_com_elo`
+
+```python
+salvar_md_resumo_simulacao_com_elo(resultados: list[dict]) -> str
+```
+
+Aggregates the raw simulation output from `rodar_simulacao_paralela` and writes a Markdown summary file to disk. The file name includes a timestamp to avoid collisions between runs.
+
+### Parameters
+
+<ParamField path="resultados" type="list" required>
+  The list of prediction dicts returned by `rodar_simulacao_paralela`. Must contain at least one entry.
+</ParamField>
+
+### Return value
+
+<ResponseField name="filename" type="str">
+  The path (relative to the working directory) of the generated `.md` file, for example `simulacao_2025-06-14_143022.md`.
+</ResponseField>
+
+### Example
+
+```python
+from sassamaru import rodar_simulacao_paralela, salvar_md_resumo_simulacao_com_elo
+
+resultados = rodar_simulacao_paralela(df, jogos, 10000)
+filename = salvar_md_resumo_simulacao_com_elo(resultados)
+print(f"Summary saved to {filename}")
+```
+
+---
+
+## `append_to_csv`
+
+```python
+append_to_csv(
+    mandante: str,
+    gols_mandante: int,
+    visitante: str,
+    gols_visitante: int
+) -> bool
+```
+
+Appends a single completed match result to the project's CSV data file (`br-25.csv`). The GUI calls this after the user enters a new result, keeping the historical dataset current without requiring manual CSV editing.
+
+### Parameters
+
+<ParamField path="mandante" type="str" required>
+  Home team name in lowercase, matching the normalisation convention used throughout the dataset.
+</ParamField>
+
+<ParamField path="gols_mandante" type="int" required>
+  Goals scored by the home team.
+</ParamField>
+
+<ParamField path="visitante" type="str" required>
+  Away team name in lowercase.
+</ParamField>
+
+<ParamField path="gols_visitante" type="int" required>
+  Goals scored by the away team.
+</ParamField>
+
+### Return value
+
+<ResponseField name="success" type="bool">
+  `True` if the row was written successfully; `False` if an I/O error occurred (file permission issue, disk full, etc.).
+</ResponseField>
+
+### Example
+
+```python
+from sassamaru import append_to_csv
+
+ok = append_to_csv("flamengo", 2, "palmeiras", 1)
+if not ok:
+    print("Failed to write result to CSV.")
+```
+
+<Warning>
+  `append_to_csv` writes directly to the CSV file on disk. There is no undo — back up `br-25.csv` before bulk-importing results.
+</Warning>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Parameters" icon="sliders" href="/reference/parameters">
+    Configurable constants that control model sensitivity.
+  </Card>
+  <Card title="Output format" icon="table" href="/reference/output-format">
+    Field-by-field breakdown of every prediction output.
+  </Card>
+</CardGroup>

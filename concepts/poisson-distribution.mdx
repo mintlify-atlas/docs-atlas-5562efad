@@ -1,0 +1,111 @@
+---
+title: 'Poisson distribution'
+description: 'How BR-25 uses the Poisson distribution to model goal counts and compute expected goals for each team.'
+---
+
+The Poisson distribution models the probability of a given number of discrete events occurring within a fixed interval, assuming events happen independently at a constant average rate. In football, goals scored in a match closely follow this distribution, making it a natural choice for predicting scorelines.
+
+## The Poisson formula
+
+The probability of exactly `k` goals given an expected rate `λ` is:
+
+```text
+P(k; λ) = e^(-λ) × λ^k / k!
+```
+
+In code:
+
+```python
+import math
+
+def poisson(lmbda, k):
+    """Calculates probability of k occurrences for mean lmbda."""
+    return math.exp(-lmbda) * (lmbda ** k) / math.factorial(k)
+```
+
+For example, if a team is expected to score `λ = 1.5` goals:
+
+- `P(0) ≈ 0.223` — probability of scoring 0 goals
+- `P(1) ≈ 0.335` — probability of scoring 1 goal
+- `P(2) ≈ 0.251` — probability of scoring 2 goals
+- `P(3) ≈ 0.126` — probability of scoring 3 goals
+
+## Computing attack and defense strength indices
+
+The expected goals value `λ` for each team in a given match is not constant — it is derived from that team's historical attacking and defensive performance, normalized against the league average.
+
+The function `calcular_forcas_poisson` computes four indices per team:
+
+| Index | Meaning |
+|---|---|
+| `ataque_casa` | Ratio of goals scored at home to league home average |
+| `defesa_casa` | Ratio of goals conceded at home to league away average |
+| `ataque_fora` | Ratio of goals scored away to league away average |
+| `defesa_fora` | Ratio of goals conceded away to league home average |
+
+```python
+def calcular_forcas_poisson(df):
+    media_gols_casa = df['gols_mandante'].mean()
+    media_gols_fora = df['gols_visitante'].mean()
+    medias_liga = {'gols_casa': media_gols_casa, 'gols_fora': media_gols_fora}
+
+    for time in times:
+        jogos_casa = df[df['mandante'] == time]
+        jogos_fora = df[df['visitante'] == time]
+
+        ataque_casa = jogos_casa['gols_mandante'].mean() / media_gols_casa
+        defesa_casa = jogos_casa['gols_visitante'].mean() / media_gols_fora
+        ataque_fora = jogos_fora['gols_visitante'].mean() / media_gols_fora
+        defesa_fora = jogos_fora['gols_mandante'].mean() / media_gols_casa
+
+        forcas[time] = {
+            'ataque_casa': ataque_casa,
+            'defesa_casa': defesa_casa,
+            'ataque_fora': ataque_fora,
+            'defesa_fora': defesa_fora,
+        }
+```
+
+An index value of `1.0` means average performance. A value of `1.3` means 30% above average; `0.7` means 30% below average.
+
+## Expected goals per match
+
+Once the strength indices are available, expected goals for a specific match are computed as:
+
+```text
+gols_base_casa      = ataque_casa(home) × defesa_fora(away) × media_gols_casa
+gols_base_visitante = ataque_fora(away) × defesa_casa(home) × media_gols_fora
+```
+
+This combines the home team's attacking threat, the away team's defensive weakness, and the overall league scoring context into a single expected goals number.
+
+## Grid truncation at 8 goals
+
+The model enumerates scorelines on a grid from 0 to `POISSON_MAX_GOLS = 8` goals per team. This means scorelines with 9 or more goals are excluded.
+
+<Info>
+Truncating at 8 goals captures over 99.9% of the probability mass for typical `λ` values in the Campeonato Brasileiro, where expected goals rarely exceed 3.0 per team.
+</Info>
+
+The Poisson distribution assigns non-zero probability to arbitrarily large `k`, but probabilities fall off rapidly. Setting `POISSON_MAX_GOLS = 8` is a practical engineering decision that avoids an infinite loop without meaningfully distorting the outcome probabilities.
+
+## Assumptions
+
+<Note>
+The Poisson model assumes that goals scored by the home team and goals scored by the away team are **statistically independent**. In practice, there is a small correlation — teams that concede early tend to open up and concede more — but the independence assumption is a standard simplification that performs well empirically.
+</Note>
+
+Other assumptions:
+
+- Historical goal averages are a reasonable predictor of future performance.
+- League averages are computed across all matches in the input dataset and treated as fixed.
+- Teams with no historical data (empty fixture list) default to an index of `1.0`.
+
+<CardGroup cols={2}>
+  <Card title="Hybrid model" icon="code-branch" href="/concepts/hybrid-model">
+    How Poisson base estimates are combined with Elo adjustment to produce final probabilities.
+  </Card>
+  <Card title="Elo rating" icon="trophy" href="/concepts/elo-rating">
+    The Elo system that adjusts goal estimates based on team strength.
+  </Card>
+</CardGroup>

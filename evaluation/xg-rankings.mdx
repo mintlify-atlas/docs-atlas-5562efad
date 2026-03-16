@@ -1,0 +1,114 @@
+---
+title: 'xG rankings'
+description: 'Understand and use the expected goals (xG) ranking output in Sassamaru BR-25.'
+---
+
+Expected goals (xG) is the number of goals the Poisson model predicts a club would score based on their attack strength, their opponent's defense strength, and league-wide scoring averages. It is a model output, not a count of actual goals scored.
+
+## xG vs actual goals
+
+| Metric | What it measures |
+|--------|------------------|
+| Actual goals | Goals scored in real matches |
+| xG (expected goals) | Goals predicted by the hybrid model given the same fixture list |
+
+A club with high xG but modest actual goals may be underperforming relative to their underlying offensive strength. A club with low xG but many actual goals may be overperforming. Over a full season the two numbers tend to converge.
+
+<Info>
+xG in Sassamaru BR-25 is derived from Poisson attack and defense force parameters, not from shot-level event data. It reflects structural offensive strength rather than shot quality.
+</Info>
+
+## The two xG metrics
+
+The ranking display reports two figures for each club:
+
+- **xG Total** — the sum of expected goals across all matches processed. A higher value indicates a club faced many matches or generated high offensive output throughout the dataset.
+- **xG Médio/Jogo** — xG Total divided by the number of matches played. This is the per-game average and is the better indicator of consistent offensive strength, independent of how many games the club played.
+
+<Tip>
+When comparing clubs that played different numbers of matches, use xG Médio/Jogo. Use xG Total when you want to understand overall season-level output.
+</Tip>
+
+## Viewing xG rankings in the GUI
+
+1. Launch the Sassamaru BR-25 GUI.
+2. Click **Mostrar Ranking xG dos Clubes**.
+
+The panel displays a ranked table sorted by xG Total in descending order:
+
+```text
+Ranking xG Total dos Clubes:
+
+Clube                | xG Total   | xG Médio/Jogo
+--------------------------------------------------
+palmeiras            |      87.34 |          1.82
+flamengo             |      83.12 |          1.73
+atlético mineiro     |      80.55 |          1.68
+internacional        |      78.91 |          1.64
+gremio               |      76.43 |          1.59
+sao paulo            |      74.27 |          1.55
+...
+```
+
+## Using `calcular_xg_por_clube` programmatically
+
+You can call the xG ranking function directly in Python without the GUI:
+
+```python
+import pandas as pd
+from sassamaru import calcular_xg_por_clube
+
+df = pd.read_csv('sassamaru-br-25/campeonato-brasileiro-full.csv')
+xg_total, xg_medio = calcular_xg_por_clube(df)
+
+# Print ranking sorted by total xG
+ranking = sorted(xg_total.items(), key=lambda x: x[1], reverse=True)
+for clube, xg in ranking:
+    print(f"{clube:20} | {xg:8.2f} | {xg_medio[clube]:6.2f}")
+```
+
+The function signature and return values:
+
+```python
+def calcular_xg_por_clube(df) -> tuple[dict, dict]:
+    """
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Match data with columns: mandante, visitante, and result columns.
+
+    Returns
+    -------
+    xg_por_clube : dict
+        Maps club name -> total xG across all matches.
+    xg_medio : dict
+        Maps club name -> average xG per match.
+    """
+```
+
+## How xG is computed internally
+
+For each row in the match DataFrame, the function calls `prever_partida_hibrido` to obtain the hybrid model prediction. The predicted goals for both the home and away club are accumulated:
+
+```python
+for _, row in df.iterrows():
+    res = prever_partida_hibrido(mandante, visitante, {}, forcas_poisson, medias_liga, {})
+    if res:
+        xg_por_clube[mandante] += res['gols_esperados_mandante']
+        xg_por_clube[visitante] += res['gols_esperados_visitante']
+        jogos_por_clube[mandante] += 1
+        jogos_por_clube[visitante] += 1
+```
+
+The Poisson force parameters (`forcas_poisson`) are estimated from the same dataset via `calcular_forcas_poisson(df)`, so xG rankings reflect the historical attack-defense equilibrium in the data.
+
+---
+
+<Columns cols={2}>
+  <Card title="Elo rankings" icon="ranking-star" href="/evaluation/elo-rankings">
+    Strength ratings updated match-by-match using the Elo system.
+  </Card>
+  <Card title="Historical insights" icon="clock-rotate-left" href="/evaluation/historical-insights">
+    Home win rates, derby imbalances, and Elo growth over time.
+  </Card>
+</Columns>

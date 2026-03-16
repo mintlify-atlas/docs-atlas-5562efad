@@ -1,0 +1,125 @@
+---
+title: Calibration
+description: Tune ELO_INFLUENCE, home advantage, K-factor, and Poisson grid size to adjust model behaviour.
+---
+
+Four constants control the balance between the Poisson and Elo components of the hybrid model. They live at the top of `previsao.py` and `sassamaru.py`. The two files ship with different defaults because the CLI is intended for conservative, research-oriented use while the GUI defaults are tuned for more opinionated predictions.
+
+## Where to edit
+
+<CodeGroup>
+
+```python previsao.py
+ELO_RATING_INICIAL = 1500
+ELO_K_FACTOR_BASE = 30
+ELO_VANTAGEM_CASA_PADRAO = 30   # change this
+ELO_INFLUENCE = 0.10            # change this
+POISSON_MAX_GOLS = 8            # change this
+```
+
+```python sassamaru.py
+ELO_VANTAGEM_CASA_PADRAO = 80   # change this
+ELO_INFLUENCE = 0.35            # change this
+```
+
+</CodeGroup>
+
+<Note>
+`ELO_K_FACTOR_BASE` and `POISSON_MAX_GOLS` are only defined in `previsao.py`. The GUI imports its core logic from the same module, so changes to `previsao.py` affect both interfaces unless `sassamaru.py` overrides the value.
+</Note>
+
+---
+
+## ELO_INFLUENCE
+
+`ELO_INFLUENCE` scales how much the Elo rating difference shifts each team's expected goals. The adjustment formula is:
+
+```text
+fator = 1 ± (elo_diff / 1000) × ELO_INFLUENCE
+```
+
+A positive `elo_diff` (home team is rated higher) increases the home team's expected goals and decreases the away team's by the same factor. At `ELO_INFLUENCE = 0` the model is pure Poisson.
+
+### Recommended values
+
+| Value | Effect | Default in |
+|-------|--------|------------|
+| `0.05` | Minimal Elo correction — nearly pure Poisson | — |
+| `0.10` | Balanced correction | `previsao.py` |
+| `0.20` | Moderate Elo correction | — |
+| `0.35` | Strong Elo correction — ratings dominate | `sassamaru.py` |
+
+<Tip>
+Start with `0.10` and increase it if you find the model ignores obvious quality gaps between clubs. Decrease it if predictions seem too sensitive to early-season rating noise.
+</Tip>
+
+---
+
+## ELO_VANTAGEM_CASA_PADRAO
+
+When a home team has no home-match history in the CSV, the model falls back to this constant as the home Elo bonus (in Elo points) before computing win probabilities.
+
+| Value | Effect | Default in |
+|-------|--------|------------|
+| `0` | No home advantage assumed | — |
+| `30` | Conservative fallback — modest home boost | `previsao.py` |
+| `80` | Aggressive fallback — strong home boost | `sassamaru.py` |
+
+The README recommends keeping this between `0` and `80`. Values above `100` can produce unrealistic home-win probabilities for teams with sparse history.
+
+<Warning>
+This constant is a **fallback only**. Once a team has played home matches in the CSV, the model derives their actual home advantage from those results and this constant is no longer used for that team.
+</Warning>
+
+---
+
+## ELO_K_FACTOR_BASE
+
+`ELO_K_FACTOR_BASE` controls how quickly Elo ratings update after each match. A higher K-factor means ratings move faster; a lower value produces more stable ratings.
+
+```python
+# previsao.py
+ELO_K_FACTOR_BASE = 30
+```
+
+| Scenario | Recommended K | Rationale |
+|----------|---------------|-----------|
+| Small dataset (< 50 matches) | `40–50` | Faster convergence from the 1500 start |
+| Full season history | `30` (default) | Balanced stability vs. responsiveness |
+| Multi-season archive | `20–25` | Prevents over-reaction to single results |
+
+<Note>
+The actual K applied per match may be further scaled by goal margin inside `atualizar_ratings_elo`. `ELO_K_FACTOR_BASE` sets the ceiling for that scaling.
+</Note>
+
+---
+
+## POISSON_MAX_GOLS
+
+`POISSON_MAX_GOLS` defines the upper bound of the scoreline grid used to compute outcome probabilities. The model builds an `(N+1) × (N+1)` matrix where `N = POISSON_MAX_GOLS`.
+
+```python
+# previsao.py
+POISSON_MAX_GOLS = 8  # grid is 9×9 = 81 scorelines
+```
+
+| Value | Grid size | Notes |
+|-------|-----------|-------|
+| `6` | 7 × 7 | Faster, underestimates high-scoring edge cases |
+| `8` | 9 × 9 | Default — sufficient for football |
+| `10` | 11 × 11 | Marginally more accurate, ~50 % more computation |
+
+In professional football, matches with more than 8 goals per team are extremely rare. The default of `8` captures more than 99.9 % of the probability mass under typical expected-goals values.
+
+<Tip>
+Only increase `POISSON_MAX_GOLS` if you are working with a competition that regularly produces very high-scoring matches, or if you need extremely precise tail probabilities for betting market calibration.
+</Tip>
+
+<CardGroup cols={2}>
+  <Card title="CLI script" icon="terminal" href="/usage/cli-script">
+    Apply calibrated constants and run predictions from the command line.
+  </Card>
+  <Card title="GUI application" icon="display" href="/usage/gui-application">
+    Run Monte Carlo simulations with the desktop interface.
+  </Card>
+</CardGroup>

@@ -1,0 +1,98 @@
+---
+title: 'Hybrid model'
+description: 'How BR-25 combines Poisson goal prediction with Elo strength adjustment to produce match outcome probabilities.'
+---
+
+The BR-25 prediction engine uses a two-stage hybrid architecture. The first stage uses a **Poisson model** to estimate how many goals each team is likely to score based on historical goal rates. The second stage applies an **Elo adjustment** that shifts those estimates up or down depending on the relative strength difference between the two teams.
+
+Neither model alone is sufficient:
+
+- Poisson captures scoring patterns and home/away context, but ignores overall team quality trends.
+- Elo captures cumulative form and head-to-head strength, but says nothing about how goals are distributed.
+
+Combining them produces more calibrated outcome probabilities than either model produces on its own.
+
+## Stage 1 — Poisson base goal estimates
+
+For each match, the model computes a base expected goals value for each team using attack and defense strength indices derived from historical data:
+
+```text
+gols_base_casa      = ataque_casa      × defesa_visitante × media_gols_liga_casa
+gols_base_visitante = ataque_visitante × defesa_casa      × media_gols_liga_fora
+```
+
+Where:
+
+- `ataque_casa` — home team's average goals scored at home, normalized by league average
+- `defesa_visitante` — away team's average goals conceded away, normalized by league average
+- `media_gols_liga_casa` — league-wide average goals scored by home teams
+
+See [Poisson distribution](/concepts/poisson-distribution) for how the strength indices are computed.
+
+## Stage 2 — Elo adjustment
+
+The Elo rating difference between the two teams is used to produce a multiplicative adjustment factor that is applied to the Poisson base estimates:
+
+```text
+elo_diff             = (rating_casa + vantagem_casa) - rating_visitante
+fator_ajuste_casa    = 1 + (elo_diff / 1000) × ELO_INFLUENCE
+fator_ajuste_visitante = 1 - (elo_diff / 1000) × ELO_INFLUENCE
+```
+
+With `ELO_INFLUENCE = 0.10`, a 100-point Elo gap shifts the expected goal totals by 1%. A 500-point gap shifts them by 5%. The adjustment is intentionally small — Poisson carries most of the signal.
+
+```python
+ELO_INFLUENCE = 0.10
+
+elo_diff = (rating_casa + vantagem_time_casa) - rating_visitante
+fator_ajuste_casa = 1 + (elo_diff / 1000) * ELO_INFLUENCE
+fator_ajuste_visitante = 1 - (elo_diff / 1000) * ELO_INFLUENCE
+
+gols_finais_casa = gols_base_casa * max(0.1, fator_ajuste_casa)
+gols_finais_visitante = gols_base_visitante * max(0.1, fator_ajuste_visitante)
+```
+
+<Note>
+The `max(0.1, ...)` floor prevents the adjusted expected goals from collapsing to zero or going negative when the Elo gap is very large.
+</Note>
+
+## Probability accumulation
+
+Once the final expected goals `λ_casa` and `λ_visitante` are computed, the model enumerates all scorelines up to `POISSON_MAX_GOLS = 8` goals per team and accumulates outcome probabilities:
+
+```python
+for g_c in range(POISSON_MAX_GOLS + 1):       # 0..8 goals for home team
+    for g_v in range(POISSON_MAX_GOLS + 1):   # 0..8 goals for away team
+        prob_placar = poisson(gols_finais_casa, g_c) * poisson(gols_finais_visitante, g_v)
+        if g_c > g_v:
+            prob_vitoria_casa += prob_placar
+        elif g_c == g_v:
+            prob_empate += prob_placar
+        else:
+            prob_vitoria_visitante += prob_placar
+```
+
+This produces three probabilities: home win, draw, and away win. Because the grid is truncated at 8 goals, scorelines with 9 or more goals are excluded. The combined probability mass of those scorelines is negligible in practice.
+
+<Tip>
+The grid approach also gives you scoreline-level probabilities as a byproduct — `prob_placar` for each `(g_c, g_v)` pair is the probability of that exact scoreline.
+</Tip>
+
+## Constants
+
+| Constant | Value | Role |
+|---|---|---|
+| `ELO_RATING_INICIAL` | 1500 | Starting Elo for new teams |
+| `ELO_K_FACTOR_BASE` | 30 | Base Elo update magnitude |
+| `ELO_VANTAGEM_CASA_PADRAO` | 30 | Fallback home advantage when no history exists |
+| `POISSON_MAX_GOLS` | 8 | Grid truncation limit per team |
+| `ELO_INFLUENCE` | 0.10 | Weight of Elo adjustment on expected goals |
+
+<CardGroup cols={2}>
+  <Card title="Poisson distribution" icon="chart-bar" href="/concepts/poisson-distribution">
+    How attack and defense strength indices are computed from historical averages.
+  </Card>
+  <Card title="Elo rating" icon="trophy" href="/concepts/elo-rating">
+    How team ratings are updated after each match and how home advantage is modeled.
+  </Card>
+</CardGroup>

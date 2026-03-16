@@ -1,0 +1,179 @@
+---
+title: "Parameters"
+description: "All configurable constants in previsao.py and sassamaru.py, with default values, valid ranges, and tuning guidance."
+---
+
+Sassamaru BR-25 exposes a small set of top-level constants that control how the hybrid model behaves. You can tune them directly in the source files without touching any function logic.
+
+<Note>
+  Several constants appear in **both** `previsao.py` (the CLI script) and `sassamaru.py` (the GUI). The two files ship with different defaults because the GUI is intended for interactive exploration where stronger effects are more visible. Keep both files in sync when deploying a calibrated configuration.
+</Note>
+
+---
+
+## `ELO_RATING_INICIAL`
+
+| File | Default | Valid range |
+|---|---|---|
+| `previsao.py` | `1500` | Any positive integer |
+| `sassamaru.py` | `1500` | Any positive integer |
+
+The starting Elo rating assigned to any team that has no historical data yet. New teams introduced mid-season begin at this value and converge toward their true strength as results accumulate.
+
+```python
+# previsao.py
+ELO_RATING_INICIAL = 1500
+
+# sassamaru.py
+ELO_RATING_INICIAL = 1500
+```
+
+<Tip>
+  1500 is the conventional chess Elo midpoint and a safe default for football. If your dataset starts from a later season and some teams are clearly dominant, consider seeding them with a higher value rather than changing this constant globally.
+</Tip>
+
+---
+
+## `ELO_K_FACTOR_BASE`
+
+| File | Default | Valid range |
+|---|---|---|
+| `previsao.py` | `30` | `10` – `50` |
+| `sassamaru.py` | `30` | `10` – `50` |
+
+The base K-factor that controls how many Elo points are exchanged after each match. The actual K used in `atualizar_ratings_elo` is scaled by goal difference:
+
+```
+K = ELO_K_FACTOR_BASE × (1 + 0.5 × max(0, goal_diff − 1))
+```
+
+A larger base K makes the model react faster to recent results; a smaller K produces more stable, history-weighted ratings.
+
+```python
+# previsao.py
+ELO_K_FACTOR_BASE = 30
+
+# sassamaru.py
+ELO_K_FACTOR_BASE = 30
+```
+
+| K value | Behaviour |
+|---|---|
+| `10` – `15` | Conservative — long history required before ratings stabilise |
+| `20` – `30` | Balanced — suitable for a full 38-match season |
+| `35` – `50` | Aggressive — recent form dominates; useful for cup competitions |
+
+---
+
+## `ELO_VANTAGEM_CASA_PADRAO`
+
+| File | Default | Valid range |
+|---|---|---|
+| `previsao.py` | `30` | `0` – `80` |
+| `sassamaru.py` | `80` | `0` – `80` |
+
+The fallback home advantage applied in Elo points when a team's historical record does not produce a positive home goal difference (i.e., `calcular_vantagens_casa` returns 0 for that team). It is also used as the initial advantage before enough home matches have been played.
+
+```python
+# previsao.py — conservative fallback
+ELO_VANTAGEM_CASA_PADRAO = 30
+
+# sassamaru.py — stronger default for GUI exploration
+ELO_VANTAGEM_CASA_PADRAO = 80
+```
+
+<Warning>
+  The two files intentionally ship with different values (`30` vs `80`). If you want consistent predictions between the CLI and GUI, set both to the same value before running comparisons.
+</Warning>
+
+A value of `0` disables the home advantage fallback entirely. Values above `80` are outside the calibrated range and may produce unrealistic win probabilities for home sides.
+
+---
+
+## `ELO_INFLUENCE`
+
+| File | Default | Valid range |
+|---|---|---|
+| `previsao.py` | `0.10` | `0.05` – `0.35` |
+| `sassamaru.py` | `0.35` | `0.05` – `0.35` |
+
+Controls how strongly the Elo rating difference between two teams shifts the Poisson expected goals. A higher value amplifies the effect of Elo on `λ`; a lower value keeps the model closer to pure Poisson strengths.
+
+The expected goals adjustment in `prever_partida_hibrido`:
+
+```
+elo_factor = 1 + ELO_INFLUENCE × elo_diff_normalised
+λ_casa      = base_λ_casa × elo_factor
+λ_visitante = base_λ_visitante / elo_factor
+```
+
+```python
+# previsao.py — subtle Elo correction
+ELO_INFLUENCE = 0.10
+
+# sassamaru.py — stronger Elo correction for GUI
+ELO_INFLUENCE = 0.35
+```
+
+| Value | Effect |
+|---|---|
+| `0.05` | Elo has almost no impact; predictions driven almost entirely by Poisson strengths |
+| `0.10` | Mild correction — historical form shapes the baseline, current rating fine-tunes it |
+| `0.20` | Moderate — a 200-point Elo gap shifts expected goals by roughly ±10 % |
+| `0.35` | Strong — significant expected goal shifts for mismatched opponents |
+
+<Tip>
+  Start with `0.10` for the CLI and increase gradually while comparing predicted probabilities against actual results. The [Calibration](/usage/calibration) guide walks through this process.
+</Tip>
+
+---
+
+## `POISSON_MAX_GOLS` / `MAX_GOLS_CONSIDERADOS`
+
+| Constant | File | Default | Valid range |
+|---|---|---|---|
+| `POISSON_MAX_GOLS` | `previsao.py` | `8` | `6` – `12` |
+| `MAX_GOLS_CONSIDERADOS` | `sassamaru.py` | `8` | `6` – `12` |
+
+The maximum number of goals per team included in the scoreline probability grid. The prediction sums over all `(i, j)` scorelines where `i` and `j` range from `0` to this value. Increasing it captures more of the tail of the Poisson distribution (rare high-scoring matches) at the cost of slightly more computation.
+
+```python
+# previsao.py
+POISSON_MAX_GOLS = 8
+
+# sassamaru.py
+MAX_GOLS_CONSIDERADOS = 8
+```
+
+The probability mass outside the grid (scorelines with more than `MAX_GOLS` goals per team) is small but nonzero:
+
+| Max goals | Approx. uncaptured probability (at λ = 1.5) |
+|---|---|
+| `6` | ≈ 0.05 % |
+| `8` | ≈ 0.001 % |
+| `10` | < 0.0001 % |
+
+The default of `8` is sufficient for all practical purposes in league football.
+
+---
+
+## Quick reference table
+
+| Constant | `previsao.py` | `sassamaru.py` | Range |
+|---|---|---|---|
+| `ELO_RATING_INICIAL` | `1500` | `1500` | any |
+| `ELO_K_FACTOR_BASE` | `30` | `30` | `10` – `50` |
+| `ELO_VANTAGEM_CASA_PADRAO` | `30` | `80` | `0` – `80` |
+| `ELO_INFLUENCE` | `0.10` | `0.35` | `0.05` – `0.35` |
+| `POISSON_MAX_GOLS` / `MAX_GOLS_CONSIDERADOS` | `8` | `8` | `6` – `12` |
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Functions" icon="code" href="/reference/functions">
+    Full API reference for every public function.
+  </Card>
+  <Card title="Output format" icon="table" href="/reference/output-format">
+    Field-by-field breakdown of every prediction output.
+  </Card>
+</CardGroup>

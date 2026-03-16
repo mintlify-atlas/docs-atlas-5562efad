@@ -1,0 +1,162 @@
+---
+title: 'Data format'
+description: 'CSV schema, encoding requirements, and how to add match results to br-25.csv.'
+---
+
+The BR-25 prediction engine reads match data from a UTF-8 encoded CSV file. This page describes the required column schema, the extended columns present in the full historical dataset, and how to append new results.
+
+## Required columns
+
+Every row in `br-25.csv` must include the four columns below. Additional columns are allowed and are preserved when new rows are appended, but the model only reads these four.
+
+| Column | Type | Description |
+|---|---|---|
+| `mandante` | string | Home team name. Stored in lowercase after loading. |
+| `visitante` | string | Away team name. Stored in lowercase after loading. |
+| `gols_mandante` | integer | Goals scored by the home team. |
+| `gols_visitante` | integer | Goals scored by the away team. |
+
+<Note>
+The data loader calls `.str.strip().str.lower()` on `mandante` and `visitante` at runtime, so mixed-case entries in the file are tolerated. However, keeping names lowercase in the file avoids confusion when inspecting the CSV manually.
+</Note>
+
+### Example CSV snippet
+
+```csv
+mandante,visitante,gols_mandante,gols_visitante
+flamengo,botafogo,2,1
+fluminense,vasco,1,1
+palmeiras,corinthians,3,0
+sao paulo,santos,1,2
+grêmio,internacional,0,0
+```
+
+## Extended columns in the full historical dataset
+
+`campeonato-brasileiro-full.csv` is used for backtesting and Elo calibration. It contains five columns:
+
+| Column | Type | Description |
+|---|---|---|
+| `mandante` | string | Home team name. |
+| `visitante` | string | Away team name. |
+| `resultado` | string | Match result string (e.g. `"2-1"`). |
+| `gols_mandante` | integer | Home team goals. |
+| `gols_visitante` | integer | Away team goals. |
+
+The full dataset is also extended in the historical loader with:
+
+| Column | Type | Description |
+|---|---|---|
+| `vencedor` | string | Winner name, or `'-'` for a draw. |
+| `data` | date | Match date, parsed with `dayfirst=True`. |
+
+<Tip>
+The `data` column is used to process matches in chronological order when building Elo ratings. See [Historical data](/data/historical-data) for details.
+</Tip>
+
+## Encoding requirement
+
+Both CSV files must be saved as **UTF-8**. Team names such as `Grêmio`, `Ceará`, `Atlético-MG`, and `São Paulo` contain multi-byte characters that will be corrupted if the file is opened and re-saved in a Latin-1 or Windows-1252 encoding.
+
+All read and write operations in the codebase explicitly pass `encoding="utf-8"`:
+
+```python
+with open(CSV_PATH, 'r', encoding='utf-8') as f:
+    ...
+with open(CSV_PATH, 'a', newline='', encoding='utf-8') as f:
+    ...
+```
+
+<Warning>
+If you edit the CSV in Excel on Windows, re-save it as "CSV UTF-8 (Comma delimited)" rather than plain "CSV". The default Excel CSV format uses the system locale encoding and will corrupt accented characters.
+</Warning>
+
+## Adding a new match result
+
+You can add results through the GUI or by editing the file directly.
+
+### Using the GUI
+
+<Steps>
+  <Step title="Open the application">
+    Launch `sassamaru.py`. The main window loads the current `br-25.csv` automatically.
+  </Step>
+  <Step title="Enter the match details">
+    Fill in the home team, away team, home goals, and away goals in the result entry form.
+  </Step>
+  <Step title="Submit the result">
+    Click the save button. The GUI calls `append_to_csv` which appends a new row to the file without rewriting existing data.
+  </Step>
+  <Step title="Verify the entry">
+    The table view refreshes. Confirm the new row appears at the bottom with correct values.
+  </Step>
+</Steps>
+
+### Editing the CSV directly
+
+<Steps>
+  <Step title="Open the file">
+    Open `br-25.csv` in a text editor or spreadsheet application that supports UTF-8.
+  </Step>
+  <Step title="Append a new row">
+    Add a line at the end of the file. All required columns must be present; any extra columns defined in the header should be left empty.
+
+```csv
+flamengo,atletico mineiro,2,0,,
+```
+  </Step>
+  <Step title="Save as UTF-8">
+    Save the file. Confirm the encoding is UTF-8 before closing.
+  </Step>
+</Steps>
+
+## The `append_to_csv` function
+
+The GUI uses `append_to_csv` to write new rows. The function:
+
+1. Opens the file and reads the header row to discover the column list.
+2. Builds a dict with every column set to an empty string, then fills in the four required fields.
+3. Opens the file in append mode (`'a'`) and writes a single row using `csv.DictWriter`.
+
+```python
+def append_to_csv(mandante, gols_mandante, visitante, gols_visitante):
+    try:
+        with open(CSV_PATH, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            headers = next(reader)
+    except Exception as e:
+        messagebox.showerror("Erro CSV", f"Erro ao ler CSV: {e}")
+        return False
+
+    new_row = {col: '' for col in headers}
+    new_row['mandante'] = mandante
+    new_row['gols_mandante'] = gols_mandante
+    new_row['visitante'] = visitante
+    new_row['gols_visitante'] = gols_visitante
+
+    try:
+        with open(CSV_PATH, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writerow(new_row)
+        return True
+    except Exception as e:
+        messagebox.showerror("Erro CSV", f"Erro ao salvar CSV: {e}")
+        return False
+```
+
+The function returns `True` on success and `False` on failure. The GUI checks the return value to decide whether to show a confirmation or an error dialog.
+
+<Note>
+The `dropna` call in `carregar_csv` removes any rows where `gols_mandante` or `gols_visitante` is `NaN`. Rows appended by `append_to_csv` always have integer goal values, so they are never dropped. Rows added manually with blank goal fields will be silently excluded from the model.
+</Note>
+
+---
+
+<Columns cols={2}>
+  <Card title="Normalization" icon="arrow-right-arrow-left" href="/data/normalization">
+    How team names are normalised and validated before the model runs.
+  </Card>
+  <Card title="Historical data" icon="clock-rotate-left" href="/data/historical-data">
+    The two CSV files and how Elo ratings are built chronologically.
+  </Card>
+</Columns>

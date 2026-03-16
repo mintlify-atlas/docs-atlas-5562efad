@@ -1,0 +1,182 @@
+---
+title: "Output format"
+description: "Field-by-field reference for the prediction dict, CLI Markdown table, and simulation summary table produced by Sassamaru BR-25."
+---
+
+Sassamaru BR-25 produces three distinct output formats depending on how you run the model:
+
+1. **Prediction dict** — the Python dictionary returned by `prever_partida_hibrido`
+2. **CLI Markdown table** — the formatted table printed to stdout by `main()` in `previsao.py`
+3. **Simulation summary table** — the Markdown file written by `salvar_md_resumo_simulacao_com_elo` in `sassamaru.py`
+
+---
+
+## Prediction dict
+
+`prever_partida_hibrido` returns a plain Python `dict` with ten string keys. All probability fields are pre-formatted strings, not raw floats, to simplify downstream display.
+
+### Fields
+
+<ResponseField name="Mandante" type="str" required>
+  Home team display name in title case (e.g., `"Flamengo"`). Derived from the `time_casa` argument passed to `prever_partida_hibrido`.
+</ResponseField>
+
+<ResponseField name="Visitante" type="str" required>
+  Away team display name in title case (e.g., `"Palmeiras"`). Derived from the `time_visitante` argument.
+</ResponseField>
+
+<ResponseField name="Elo Mandante" type="int" required>
+  The home team's Elo rating at the time the prediction was made, rounded to the nearest integer.
+</ResponseField>
+
+<ResponseField name="Elo Visitante" type="int" required>
+  The away team's Elo rating at the time the prediction was made, rounded to the nearest integer.
+</ResponseField>
+
+<ResponseField name="Gols Esp. Mandante" type="float" required>
+  Elo-adjusted expected goals for the home team (λ_casa). Rounded to two decimal places in the dict; used as the mean of the Poisson distribution for home scorelines.
+</ResponseField>
+
+<ResponseField name="Gols Esp. Visitante" type="float" required>
+  Elo-adjusted expected goals for the away team (λ_visitante). Rounded to two decimal places.
+</ResponseField>
+
+<ResponseField name="P(Mandante)%" type="str" required>
+  Home win probability formatted as `"XX.X"` (one decimal place, no percent sign). Sum of all scoreline probabilities where home goals > away goals.
+</ResponseField>
+
+<ResponseField name="P(Empate)%" type="str" required>
+  Draw probability formatted as `"XX.X"`. Sum of all scoreline probabilities where home goals = away goals.
+</ResponseField>
+
+<ResponseField name="P(Visitante)%" type="str" required>
+  Away win probability formatted as `"XX.X"`. Sum of all scoreline probabilities where away goals > home goals.
+</ResponseField>
+
+<ResponseField name="Palpite" type="str" required>
+  The recommended tip — always one of three literal values:
+
+  - `"Mandante"` — predict home win
+  - `"Empate"` — predict draw
+  - `"Visitante"` — predict away win
+
+  Selected as the outcome with the highest probability among the three.
+</ResponseField>
+
+### Example
+
+```python
+{
+    "Mandante": "Flamengo",
+    "Visitante": "Palmeiras",
+    "Elo Mandante": 1638,
+    "Elo Visitante": 1601,
+    "Gols Esp. Mandante": 1.84,
+    "Gols Esp. Visitante": 1.21,
+    "P(Mandante)%": "48.3",
+    "P(Empate)%": "24.1",
+    "P(Visitante)%": "27.6",
+    "Palpite": "Mandante"
+}
+```
+
+<Note>
+  The three probabilities `P(Mandante)%`, `P(Empate)%`, and `P(Visitante)%` should sum to approximately `100.0`. Any deviation (typically < 0.1 %) is due to the truncation of the scoreline grid at `POISSON_MAX_GOLS`.
+</Note>
+
+---
+
+## CLI Markdown table
+
+`main()` in `previsao.py` collects prediction dicts for a hardcoded list of matches and prints them as a GitHub-flavored Markdown table to stdout. You can pipe this output directly into a report or paste it into a GitHub issue.
+
+### Table columns
+
+| Column | Source field | Notes |
+|---|---|---|
+| Mandante | `Mandante` | Title-cased home team name |
+| Visitante | `Visitante` | Title-cased away team name |
+| Elo M | `Elo Mandante` | Integer Elo |
+| Elo V | `Elo Visitante` | Integer Elo |
+| Gols Esp. M | `Gols Esp. Mandante` | Two decimal places |
+| Gols Esp. V | `Gols Esp. Visitante` | Two decimal places |
+| P(M)% | `P(Mandante)%` | One decimal place |
+| P(E)% | `P(Empate)%` | One decimal place |
+| P(V)% | `P(Visitante)%` | One decimal place |
+| Palpite | `Palpite` | `Mandante`, `Empate`, or `Visitante` |
+
+### Example output
+
+```
+| Mandante | Visitante | Elo M | Elo V | Gols Esp. M | Gols Esp. V | P(M)%  | P(E)%  | P(V)%  | Palpite    |
+|----------|-----------|-------|-------|-------------|-------------|--------|--------|--------|------------|
+| Flamengo | Palmeiras | 1638  | 1601  | 1.84        | 1.21        | 48.3   | 24.1   | 27.6   | Mandante   |
+| Santos   | Cruzeiro  | 1492  | 1538  | 1.31        | 1.47        | 33.8   | 27.2   | 39.0   | Visitante  |
+| Gremio   | Fortaleza | 1510  | 1524  | 1.43        | 1.39        | 38.5   | 26.4   | 35.1   | Mandante   |
+```
+
+Run the CLI with:
+
+```bash
+python previsao.py
+```
+
+---
+
+## Simulation summary table
+
+`salvar_md_resumo_simulacao_com_elo` in `sassamaru.py` aggregates the raw output of `rodar_simulacao_paralela` and writes a Markdown file that includes additional Elo context columns not present in the CLI table.
+
+### Additional columns
+
+The simulation summary extends the base table with three extra columns:
+
+| Column | Description |
+|---|---|
+| ELO Mandante | Home team Elo at prediction time (integer) |
+| ELO Visitante | Away team Elo at prediction time (integer) |
+| Diferença ELO | Signed Elo difference: `ELO Mandante − ELO Visitante` |
+
+### Full column order
+
+| # | Column | Example value |
+|---|---|---|
+| 1 | Mandante | `Flamengo` |
+| 2 | Visitante | `Palmeiras` |
+| 3 | ELO Mandante | `1638` |
+| 4 | ELO Visitante | `1601` |
+| 5 | Diferença ELO | `+37` |
+| 6 | Gols Esp. M | `1.84` |
+| 7 | Gols Esp. V | `1.21` |
+| 8 | P(M)% | `48.3` |
+| 9 | P(E)% | `24.1` |
+| 10 | P(V)% | `27.6` |
+| 11 | Palpite | `Mandante` |
+
+### Example output
+
+```
+# Simulação BR-25 — 2025-06-14 14:30:22
+
+| Mandante | Visitante | ELO Mandante | ELO Visitante | Diferença ELO | Gols Esp. M | Gols Esp. V | P(M)%  | P(E)%  | P(V)%  | Palpite   |
+|----------|-----------|-------------|--------------|---------------|-------------|-------------|--------|--------|--------|----------|
+| Flamengo | Palmeiras | 1638        | 1601         | +37           | 1.84        | 1.21        | 48.3   | 24.1   | 27.6   | Mandante |
+| Santos   | Cruzeiro  | 1492        | 1538         | -46           | 1.31        | 1.47        | 33.8   | 27.2   | 39.0   | Visitante |
+```
+
+The filename follows the pattern `simulacao_YYYY-MM-DD_HHMMSS.md` and is written to the current working directory.
+
+<Tip>
+  The `Diferença ELO` column is the fastest way to identify mismatches. A difference above `+100` strongly favours the home side; below `-100` it favours the away side regardless of Poisson strengths.
+</Tip>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Functions" icon="code" href="/reference/functions">
+    Full API reference for every public function.
+  </Card>
+  <Card title="Parameters" icon="sliders" href="/reference/parameters">
+    Configurable constants that control model sensitivity.
+  </Card>
+</CardGroup>
