@@ -1,0 +1,86 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "Sassamaru BR-25",
+  "projectDescription": "A hybrid Poisson + Elo rating model for predicting Campeonato Brasileiro football match outcomes, providing win/draw/loss probabilities and expected goals.",
+  "theme": "palm",
+  "primaryColor": "#46bde6",
+  "lightColor": "#a4e0f1",
+  "darkColor": "#80cee3",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "quickstart"]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/hybrid-model",
+              "concepts/poisson-distribution",
+              "concepts/elo-rating"
+            ]
+          },
+          {
+            "group": "Data Guide",
+            "pages": [
+              "data/data-format",
+              "data/normalization",
+              "data/historical-data"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/cli-script",
+              "usage/gui-application",
+              "usage/calibration"
+            ]
+          },
+          {
+            "group": "Model Reference",
+            "pages": [
+              "reference/functions",
+              "reference/parameters",
+              "reference/output-format"
+            ]
+          },
+          {
+            "group": "Evaluation",
+            "pages": [
+              "evaluation/elo-rankings",
+              "evaluation/xg-rankings",
+              "evaluation/historical-insights"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Hybrid Poisson + Elo model for match outcome prediction",
+    "Dynamic Elo ratings updated after each match result",
+    "Home advantage calculation based on historical goal difference",
+    "Win/draw/loss probability output with expected goals",
+    "Parallel Monte Carlo simulation support (10k to 100k runs)",
+    "Tkinter GUI for interactive match prediction",
+    "CLI script for batch Markdown table output",
+    "CSV-based data ingestion and team normalization utility",
+    "Expected goals (xG) ranking per club",
+    "Configurable ELO_INFLUENCE and ELO_VANTAGEM_CASA_PADRAO parameters"
+  ],
+  "publicApiSurface": [
+    "prever_partida_hibrido(time_casa, time_visitante, context) -> dict",
+    "calcular_forcas_poisson(df) -> tuple[dict, dict]",
+    "calcular_vantagens_casa(df) -> dict",
+    "atualizar_ratings_elo(rating_c, rating_v, placar_c, placar_v, vantagem_c) -> tuple",
+    "poisson(lmbda, k) -> float",
+    "rodar_simulacao_paralela(df, jogos, n_simulacoes, progress_callback) -> list",
+    "calcular_xg_por_clube(df) -> tuple[dict, dict]",
+    "append_to_csv(mandante, gols_mandante, visitante, gols_visitante) -> bool",
+    "SimuladorApp (Tkinter GUI class)",
+    "previsao.py main() - CLI entry point"
+  ]
+}
